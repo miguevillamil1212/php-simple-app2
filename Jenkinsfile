@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   environment {
-    DOCKER_HUB_REPO = 'miguel1212/indep-docker'
+    DOCKER_HUB_REPO = 'miguel1212/php-simple-app2'
     // Estas dos se rellenan tras generar VERSION_TAG
     DOCKER_IMAGE      = ''                  // p.ej. miguel1212/indep-docker:20251031-183012-ab12cd3
     DOCKER_TAG_LATEST = ''                  // miguel1212/indep-docker:latest
