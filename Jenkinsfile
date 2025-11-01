@@ -8,9 +8,9 @@ pipeline {
   }
 
   environment {
-    IMAGE_NAME      = 'miguel1212/php-simple-app2'
+    IMAGE_NAME   = 'miguel1212/php-simple-app2'
     DOCKER_BUILDKIT = '1'
-    VERSION_TAG     = ''
+    VERSION_TAG  = ''
   }
 
   stages {
@@ -25,7 +25,7 @@ pipeline {
       steps {
         script {
           env.VERSION_TAG = sh(
-            script: 'echo $(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)',
+            script: 'DATE_TAG=$(date +%Y%m%d-%H%M%S); GIT_COMMIT=$(git rev-parse --short HEAD); printf "%s-%s" "$DATE_TAG" "$GIT_COMMIT"',
             returnStdout: true
           ).trim()
           echo "🔖 Versión generada: ${env.VERSION_TAG}"
@@ -37,7 +37,7 @@ pipeline {
     stage('Verificar Docker') {
       steps {
         sh '''
-          echo "🔍 Verificando conexión con Docker..."
+          echo "🔍 Verificando Docker..."
           docker version
         '''
       }
@@ -48,7 +48,7 @@ pipeline {
         sh '''
           echo "🔧 Construyendo imagen..."
           docker build -t $IMAGE_NAME:latest -t $IMAGE_NAME:${VERSION_TAG} .
-          docker images | grep $IMAGE_NAME
+          docker images | grep "$IMAGE_NAME" || true
         '''
       }
     }
@@ -61,10 +61,10 @@ pipeline {
           passwordVariable: 'DOCKERHUB_PASS'
         )]) {
           sh '''
-            echo "🚀 Iniciando sesión en Docker Hub..."
+            echo "🔐 Login Docker Hub..."
             echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
 
-            echo "⬆️ Subiendo imagen..."
+            echo "⬆️ Push..."
             docker push $IMAGE_NAME:latest
             docker push $IMAGE_NAME:${VERSION_TAG}
 
@@ -76,18 +76,14 @@ pipeline {
 
     stage('Cleanup') {
       steps {
-        sh '''
-          echo "🧹 Limpiando imágenes locales..."
-          docker system prune -f || true
-        '''
+        sh 'docker system prune -f || true'
       }
     }
   }
 
   post {
     success {
-      echo "✅ Pipeline completado con éxito."
-      echo "Imagen publicada: ${IMAGE_NAME}:${VERSION_TAG}"
+      echo "✅ Listo: ${IMAGE_NAME}:${VERSION_TAG}"
     }
     failure {
       echo "❌ Pipeline falló. Revisa los logs."
