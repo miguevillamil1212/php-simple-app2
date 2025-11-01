@@ -11,7 +11,7 @@ pipeline {
     IMAGE_NAME      = 'miguel1212/php-simple-app2'
     DOCKER_BUILDKIT = '1'
     APP_ARCHIVE     = 'php-simple-app.tar.gz'
-    VERSION_TAG     = ''   // se llenará en "Generate Tag" SIEMPRE
+    VERSION_TAG     = ''     // se setea en Generate Tag
     HAS_DOCKER      = 'false'
   }
 
@@ -22,14 +22,18 @@ pipeline {
       }
     }
 
-    // Generar Tag SIEMPRE (así exista o no Docker)
+    // Generar Tag SIEMPRE (tras el checkout)
     stage('Generate Tag') {
       steps {
         script {
-          def GIT_COMMIT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-          def DATE_TAG   = sh(script: "date +%Y%m%d-%H%M%S",       returnStdout: true).trim()
-          env.VERSION_TAG = "${DATE_TAG}-${GIT_COMMIT}"
+          // Hacer todo en un solo sh evita nulls por interpolación/scope
+          env.VERSION_TAG = sh(
+            script: 'echo $(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)',
+            returnStdout: true
+          ).trim()
           echo "🔖 Versión generada: ${env.VERSION_TAG}"
+          // (Opcional) mostrar el tag en el nombre del build
+          currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.VERSION_TAG}"
         }
       }
     }
@@ -93,11 +97,17 @@ pipeline {
         sh '''
           set -eu
           rm -f "$APP_ARCHIVE"
+          # Evitar fallo por "file changed as we read it"
+          set +e
           tar --exclude-vcs \
               --exclude="./.git" \
               --exclude="./.git/*" \
               --exclude="./**/@tmp/**" \
+              --warning=no-file-changed --ignore-failed-read \
               -czf "$APP_ARCHIVE" .
+          rc=$?
+          set -e
+          [ $rc -eq 0 ] || echo "WARN: tar terminó con advertencias, continuando…"
         '''
         archiveArtifacts artifacts: "${APP_ARCHIVE}", fingerprint: true
         echo "No hay Docker en el nodo. Se archivó la app como: ${APP_ARCHIVE}"
@@ -108,7 +118,6 @@ pipeline {
   post {
     success {
       script {
-        // Fallback seguro por si algo raro deja VERSION_TAG vacío
         def tag = (env.VERSION_TAG?.trim()) ? env.VERSION_TAG : "no-docker"
         echo "✅ Pipeline completado con éxito."
         echo "Imagen/versión generada: ${IMAGE_NAME}:${tag}"
