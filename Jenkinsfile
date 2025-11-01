@@ -11,6 +11,10 @@ pipeline {
     DOCKER_IMAGE      = ''     // p.ej. miguel1212/php-simple-app2:20251031-183012-ab12cd3
     DOCKER_TAG_LATEST = ''     // miguel1212/php-simple-app2:latest
     VERSION_TAG       = ''
+
+    // Opcional: acelerar y estandarizar builds
+    DOCKER_BUILDKIT = '1'
+    COMPOSE_DOCKER_CLI_BUILD = '1'
   }
 
   stages {
@@ -34,7 +38,7 @@ pipeline {
           # Falla controlada si no hay acceso al daemon
           docker info >/dev/null 2>&1 || {
             echo "ERROR: Jenkins no puede acceder al daemon de Docker.";
-            echo "Si estás en Windows con Docker Desktop, asegúrate de montar //./pipe/docker_engine en /var/run/docker.sock";
+            echo "Si estás en Windows con Docker Desktop, monta //./pipe/docker_engine en /var/run/docker.sock";
             exit 1;
           }
           docker version
@@ -62,7 +66,7 @@ pipeline {
       steps {
         sh '''
           echo "🔧 Construyendo imagen"
-          docker build -t ${DOCKER_IMAGE} .
+          docker build --pull --progress=plain -t ${DOCKER_IMAGE} .
           docker tag ${DOCKER_IMAGE} ${DOCKER_TAG_LATEST}
           docker images | grep -E "${DOCKER_HUB_REPO}" || true
         '''
@@ -73,7 +77,12 @@ pipeline {
       steps {
         echo "🧪 Ejecutando smoke test..."
         sh '''
-          docker run --rm ${DOCKER_IMAGE} echo "✅ Imagen ejecutada correctamente"
+          # Usar /bin/sh como entrypoint neutro para evitar depender del ENTRYPOINT del Dockerfile
+          if docker run --rm --entrypoint /bin/sh ${DOCKER_IMAGE} -lc 'echo "✅ Imagen ejecutada correctamente"'; then
+            echo "Smoke test OK"
+          else
+            echo "ERROR: Smoke test falló"; exit 1
+          fi
         '''
       }
     }
