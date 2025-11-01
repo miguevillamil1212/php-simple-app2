@@ -63,7 +63,7 @@ pipeline {
       when { expression { env.HAS_DOCKER == 'true' } }
       steps {
         withCredentials([usernamePassword(
-          credentialsId: 'docker-hub-credentials',
+          credentialsId: 'docker-hub-creds',
           usernameVariable: 'DOCKERHUB_USER',
           passwordVariable: 'DOCKERHUB_PASS'
         )]) {
