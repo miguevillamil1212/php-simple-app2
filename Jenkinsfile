@@ -1,97 +1,108 @@
 pipeline {
   agent any
 
-  options {
-    skipDefaultCheckout(true)
-    disableConcurrentBuilds()
-    timestamps()
-  }
-
   environment {
-    IMAGE_NAME      = 'miguel1212/php-simple-app'
-    DOCKER_BUILDKIT = '1'
-    APP_ARCHIVE     = 'php-simple-app.tar.gz'
+    DOCKER_HUB_REPO = 'miguel1212/indep-docker'
+    // Estas dos se rellenan tras generar VERSION_TAG
+    DOCKER_IMAGE      = ''                  // p.ej. miguel1212/indep-docker:20251031-183012-ab12cd3
+    DOCKER_TAG_LATEST = ''                  // miguel1212/indep-docker:latest
   }
 
   stages {
+
     stage('Checkout') {
       steps {
-        git branch: 'main', url: 'https://github.com/miguevillamil1212/php-simple-app.git'
+        echo "📦 Checkout del repositorio"
+        checkout scm
       }
     }
 
-    stage('Detectar Docker en el nodo') {
+    stage('Verificar entorno Docker') {
       steps {
-        script {
-          def rc = sh(script: 'command -v docker >/dev/null 2>&1', returnStatus: true)
-          env.HAS_DOCKER = (rc == 0) ? 'true' : 'false'
-          echo "HAS_DOCKER = ${env.HAS_DOCKER}"
-        }
-      }
-    }
-
-    /* ========= Camino A: hay Docker => build & push ========= */
-    stage('Build Docker Image') {
-      when { expression { env.HAS_DOCKER == 'true' } }
-      steps {
+        echo "🔎 Verificando conexión con Docker"
         sh '''
-          set -eu
+          echo "DOCKER_HOST=${DOCKER_HOST}"
           docker version
-          docker build \
-            -t $IMAGE_NAME:latest \
-            -t $IMAGE_NAME:${BUILD_NUMBER} .
         '''
       }
     }
 
-    stage('Login & Push a Docker Hub') {
-      when { expression { env.HAS_DOCKER == 'true' } }
+    stage('Generate Tag') {
       steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'docker-hub-creds',
-          usernameVariable: 'DOCKERHUB_USER',
-          passwordVariable: 'DOCKERHUB_PASS'
-        )]) {
+        script {
+          def GIT_COMMIT  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+          def DATE_TAG    = sh(script: "date +%Y%m%d-%H%M%S",       returnStdout: true).trim()
+          def VERSION_TAG = "${DATE_TAG}-${GIT_COMMIT}"
+
+          env.VERSION_TAG      = VERSION_TAG
+          env.DOCKER_IMAGE     = "${env.DOCKER_HUB_REPO}:${VERSION_TAG}"
+          env.DOCKER_TAG_LATEST= "${env.DOCKER_HUB_REPO}:latest"
+
+          echo "Versión generada: ${VERSION_TAG}"
+        }
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        sh '''
+          echo "=== Construyendo imagen ==="
+          docker build -t ${DOCKER_IMAGE} .
+          docker tag ${DOCKER_IMAGE} ${DOCKER_TAG_LATEST}
+        '''
+      }
+    }
+
+    stage('Prueba rápida (smoke test)') {
+      steps {
+        echo "🧪 Ejecutando prueba rápida..."
+        sh '''
+          docker run --rm ${DOCKER_IMAGE} echo "✅ Imagen ejecutada correctamente"
+        '''
+      }
+    }
+
+    stage('Push to DockerHub') {
+      steps {
+        sh 'echo "=== Subiendo imagen a DockerHub ==="'
+        withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
           sh '''
-            set -eu
-            echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
-            docker push $IMAGE_NAME:latest
-            docker push $IMAGE_NAME:${BUILD_NUMBER}
-            docker logout || true
+            echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
+            docker push ${DOCKER_IMAGE}
+            docker push ${DOCKER_TAG_LATEST}
+            docker logout
           '''
         }
       }
     }
 
-    stage('Cleanup Docker') {
-      when { expression { env.HAS_DOCKER == 'true' } }
+    stage('Desplegar (solo en main)') {
+      when { branch 'main' }
       steps {
-        sh 'docker system prune -f || true'
-      }
-    }
-
-    /* ========= Camino B: NO hay Docker => empaquetar y archivar ========= */
-    stage('Empaquetar app (sin Docker)') {
-      when { expression { env.HAS_DOCKER == "false" } }
-      steps {
+        echo "🌍 Desplegando la aplicación (solo en main)..."
         sh '''
-          set -eu
-          rm -f "$APP_ARCHIVE"
-          # Empaqueta todo excepto .git y el workspace temporal de Jenkins
-          tar --exclude-vcs \
-              --exclude="./.git" \
-              --exclude="./.git/*" \
-              --exclude="./**/@tmp/**" \
-              -czf "$APP_ARCHIVE" .
+          docker compose down || true
+          docker compose up -d
         '''
-        archiveArtifacts artifacts: "${APP_ARCHIVE}", fingerprint: true
-        echo "No hay Docker en el nodo. Se archivó la app como: ${APP_ARCHIVE}"
       }
     }
   }
 
   post {
-    success { echo '✅ Pipeline completado con éxito (Docker push si había Docker; artefacto .tar.gz si no).' }
-    failure { echo '❌ Pipeline falló' }
+    always {
+      echo "=== Limpieza final ==="
+      sh 'docker system prune -f || true'
+    }
+    success {
+      echo "Pipeline completado con éxito"
+      echo "Se subieron las siguientes versiones:"
+      echo "→ ${DOCKER_TAG_LATEST}"
+      echo "→ ${DOCKER_IMAGE}"
+    }
+    failure {
+      echo "Pipeline falló"
+      // Si manejas logs locales, los archivará si existen
+      archiveArtifacts artifacts: '**/logs/*.log', allowEmptyArchive: true
+    }
   }
 }

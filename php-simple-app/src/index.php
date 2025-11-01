@@ -49,7 +49,7 @@
             <p><strong>Fecha:</strong> <?php echo date('Y-m-d H:i:s'); ?></p>
         </div>
         
-        <p style="margin-top: 30px;">🎉 ¡Despliegue automático exitoso!</p>
+        <p style="margin-top: 30px;">🎉 ¡Despliegue automático exitoso por Miguel Villamil!</p>
     </div>
 </body>
 </html>
