@@ -10,61 +10,50 @@ pipeline {
   environment {
     IMAGE_NAME      = 'miguel1212/php-simple-app2'
     DOCKER_BUILDKIT = '1'
-    APP_ARCHIVE     = 'php-simple-app.tar.gz'
-    VERSION_TAG     = ''     // se setea en Generate Tag
-    HAS_DOCKER      = 'false'
+    VERSION_TAG     = ''
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         git branch: 'main', url: 'https://github.com/miguevillamil1212/php-simple-app2.git'
       }
     }
 
-    // Generar Tag SIEMPRE (tras el checkout)
     stage('Generate Tag') {
       steps {
         script {
-          // Hacer todo en un solo sh evita nulls por interpolación/scope
           env.VERSION_TAG = sh(
             script: 'echo $(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)',
             returnStdout: true
           ).trim()
           echo "🔖 Versión generada: ${env.VERSION_TAG}"
-          // (Opcional) mostrar el tag en el nombre del build
           currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.VERSION_TAG}"
         }
       }
     }
 
-    stage('Detectar Docker en el nodo') {
-      steps {
-        script {
-          def rc = sh(script: 'command -v docker >/dev/null 2>&1', returnStatus: true)
-          env.HAS_DOCKER = (rc == 0) ? 'true' : 'false'
-          echo "HAS_DOCKER = ${env.HAS_DOCKER}"
-        }
-      }
-    }
-
-    /* ========= Camino A: hay Docker => build & push ========= */
-    stage('Build Docker Image') {
-      when { expression { env.HAS_DOCKER == 'true' } }
+    stage('Verificar Docker') {
       steps {
         sh '''
-          set -eu
+          echo "🔍 Verificando conexión con Docker..."
           docker version
-          echo "🔧 Construyendo imagen con tag ${VERSION_TAG}"
-          docker build \
-            -t $IMAGE_NAME:latest \
-            -t $IMAGE_NAME:${VERSION_TAG} .
         '''
       }
     }
 
-    stage('Login & Push a Docker Hub') {
-      when { expression { env.HAS_DOCKER == 'true' } }
+    stage('Build Docker Image') {
+      steps {
+        sh '''
+          echo "🔧 Construyendo imagen..."
+          docker build -t $IMAGE_NAME:latest -t $IMAGE_NAME:${VERSION_TAG} .
+          docker images | grep $IMAGE_NAME
+        '''
+      }
+    }
+
+    stage('Push to Docker Hub') {
       steps {
         withCredentials([usernamePassword(
           credentialsId: 'docker-hub-creds',
@@ -72,59 +61,36 @@ pipeline {
           passwordVariable: 'DOCKERHUB_PASS'
         )]) {
           sh '''
-            set -eu
+            echo "🚀 Iniciando sesión en Docker Hub..."
             echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
-            echo "🚀 Subiendo imagen a Docker Hub..."
+
+            echo "⬆️ Subiendo imagen..."
             docker push $IMAGE_NAME:latest
             docker push $IMAGE_NAME:${VERSION_TAG}
+
             docker logout || true
           '''
         }
       }
     }
 
-    stage('Cleanup Docker') {
-      when { expression { env.HAS_DOCKER == 'true' } }
-      steps {
-        sh 'docker system prune -f || true'
-      }
-    }
-
-    /* ========= Camino B: NO hay Docker => empaquetar y archivar ========= */
-    stage('Empaquetar app (sin Docker)') {
-      when { expression { env.HAS_DOCKER == "false" } }
+    stage('Cleanup') {
       steps {
         sh '''
-          set -eu
-          rm -f "$APP_ARCHIVE"
-          # Evitar fallo por "file changed as we read it"
-          set +e
-          tar --exclude-vcs \
-              --exclude="./.git" \
-              --exclude="./.git/*" \
-              --exclude="./**/@tmp/**" \
-              --warning=no-file-changed --ignore-failed-read \
-              -czf "$APP_ARCHIVE" .
-          rc=$?
-          set -e
-          [ $rc -eq 0 ] || echo "WARN: tar terminó con advertencias, continuando…"
+          echo "🧹 Limpiando imágenes locales..."
+          docker system prune -f || true
         '''
-        archiveArtifacts artifacts: "${APP_ARCHIVE}", fingerprint: true
-        echo "No hay Docker en el nodo. Se archivó la app como: ${APP_ARCHIVE}"
       }
     }
   }
 
   post {
     success {
-      script {
-        def tag = (env.VERSION_TAG?.trim()) ? env.VERSION_TAG : "no-docker"
-        echo "✅ Pipeline completado con éxito."
-        echo "Imagen/versión generada: ${IMAGE_NAME}:${tag}"
-      }
+      echo "✅ Pipeline completado con éxito."
+      echo "Imagen publicada: ${IMAGE_NAME}:${VERSION_TAG}"
     }
     failure {
-      echo "❌ Pipeline falló"
+      echo "❌ Pipeline falló. Revisa los logs."
     }
   }
 }
