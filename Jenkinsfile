@@ -11,7 +11,8 @@ pipeline {
     IMAGE_NAME      = 'miguel1212/php-simple-app2'
     DOCKER_BUILDKIT = '1'
     APP_ARCHIVE     = 'php-simple-app.tar.gz'
-    VERSION_TAG     = ''
+    VERSION_TAG     = ''   // se llenará en "Generate Tag" SIEMPRE
+    HAS_DOCKER      = 'false'
   }
 
   stages {
@@ -21,25 +22,24 @@ pipeline {
       }
     }
 
+    // Generar Tag SIEMPRE (así exista o no Docker)
+    stage('Generate Tag') {
+      steps {
+        script {
+          def GIT_COMMIT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+          def DATE_TAG   = sh(script: "date +%Y%m%d-%H%M%S",       returnStdout: true).trim()
+          env.VERSION_TAG = "${DATE_TAG}-${GIT_COMMIT}"
+          echo "🔖 Versión generada: ${env.VERSION_TAG}"
+        }
+      }
+    }
+
     stage('Detectar Docker en el nodo') {
       steps {
         script {
           def rc = sh(script: 'command -v docker >/dev/null 2>&1', returnStatus: true)
           env.HAS_DOCKER = (rc == 0) ? 'true' : 'false'
           echo "HAS_DOCKER = ${env.HAS_DOCKER}"
-        }
-      }
-    }
-
-    /* ======== Generar Tag (fecha + commit corto) ======== */
-    stage('Generate Tag') {
-      when { expression { env.HAS_DOCKER == 'true' } }
-      steps {
-        script {
-          def GIT_COMMIT  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-          def DATE_TAG    = sh(script: "date +%Y%m%d-%H%M%S",       returnStdout: true).trim()
-          env.VERSION_TAG = "${DATE_TAG}-${GIT_COMMIT}"
-          echo "🔖 Versión generada: ${env.VERSION_TAG}"
         }
       }
     }
@@ -107,8 +107,12 @@ pipeline {
 
   post {
     success {
-      echo "✅ Pipeline completado con éxito."
-      echo "Imagen generada: ${IMAGE_NAME}:${VERSION_TAG}"
+      script {
+        // Fallback seguro por si algo raro deja VERSION_TAG vacío
+        def tag = (env.VERSION_TAG?.trim()) ? env.VERSION_TAG : "no-docker"
+        echo "✅ Pipeline completado con éxito."
+        echo "Imagen/versión generada: ${IMAGE_NAME}:${tag}"
+      }
     }
     failure {
       echo "❌ Pipeline falló"
