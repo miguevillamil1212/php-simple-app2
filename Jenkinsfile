@@ -8,9 +8,9 @@ pipeline {
   }
 
   environment {
-    IMAGE_NAME   = 'miguel1212/php-simple-app2'
+    IMAGE_NAME     = 'miguel1212/php-simple-app2'
     DOCKER_BUILDKIT = '1'
-    VERSION_TAG  = ''
+    VERSION_TAG    = ''
   }
 
   stages {
@@ -24,36 +24,22 @@ pipeline {
     stage('Generate Tag') {
       steps {
         script {
-          env.VERSION_TAG = sh(
-            script: 'DATE_TAG=$(date +%Y%m%d-%H%M%S); GIT_COMMIT=$(git rev-parse --short HEAD); printf "%s-%s" "$DATE_TAG" "$GIT_COMMIT"',
-            returnStdout: true
-          ).trim()
-          echo "🔖 Versión generada: ${env.VERSION_TAG}"
+          // Fecha con zona de Bogotá para consistencia visual
+          def tz   = java.util.TimeZone.getTimeZone('America/Bogota')
+          def fmt  = new java.text.SimpleDateFormat('yyyyMMdd-HHmmss'); fmt.setTimeZone(tz)
+          def dateTag    = fmt.format(new Date())
+          def shortCommit = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+
+          def vt = "${dateTag}-${shortCommit}"
+          echo "🔖 Versión generada local: ${vt}"
+
+          env.VERSION_TAG = vt
           currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.VERSION_TAG}"
         }
       }
     }
 
-    stage('Verificar Docker') {
-      steps {
-        sh '''
-          echo "🔍 Verificando Docker..."
-          docker version
-        '''
-      }
-    }
-
-    stage('Build Docker Image') {
-      steps {
-        sh '''
-          echo "🔧 Construyendo imagen..."
-          docker build -t $IMAGE_NAME:latest -t $IMAGE_NAME:${VERSION_TAG} .
-          docker images | grep "$IMAGE_NAME" || true
-        '''
-      }
-    }
-
-    stage('Push to Docker Hub') {
+    stage('Build & Push') {
       steps {
         withCredentials([usernamePassword(
           credentialsId: 'docker-hub-creds',
@@ -61,32 +47,35 @@ pipeline {
           passwordVariable: 'DOCKERHUB_PASS'
         )]) {
           sh '''
-            echo "🔐 Login Docker Hub..."
-            echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+            set -eu
+            echo "🔍 Verificando Docker..."
+            docker version
 
-            echo "⬆️ Push..."
-            docker push $IMAGE_NAME:latest
-            docker push $IMAGE_NAME:${VERSION_TAG}
+            echo "🔧 Construyendo imagen ${IMAGE_NAME}:${VERSION_TAG} y :latest"
+            docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${VERSION_TAG} .
+
+            echo "🔐 Login en Docker Hub..."
+            echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
+
+            echo "⬆️ Push de tags..."
+            docker push ${IMAGE_NAME}:latest
+            docker push ${IMAGE_NAME}:${VERSION_TAG}
 
             docker logout || true
+            echo "🧹 Limpieza..."
+            docker system prune -f || true
           '''
         }
-      }
-    }
-
-    stage('Cleanup') {
-      steps {
-        sh 'docker system prune -f || true'
       }
     }
   }
 
   post {
     success {
-      echo "✅ Listo: ${IMAGE_NAME}:${VERSION_TAG}"
+      echo "✅ Publicado: ${IMAGE_NAME}:${VERSION_TAG}"
     }
     failure {
-      echo "❌ Pipeline falló. Revisa los logs."
+      echo "❌ Pipeline falló. Revisa si Docker está disponible dentro de Jenkins."
     }
   }
 }
