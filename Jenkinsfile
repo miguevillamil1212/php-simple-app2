@@ -8,9 +8,9 @@ pipeline {
   }
 
   environment {
-    IMAGE_NAME     = 'miguel1212/php-simple-app2'
+    IMAGE_NAME      = 'miguel1212/php-simple-app2'
     DOCKER_BUILDKIT = '1'
-    VERSION_TAG    = ''
+    VERSION_TAG     = ''
   }
 
   stages {
@@ -24,12 +24,19 @@ pipeline {
     stage('Generate Tag') {
       steps {
         script {
-          // Fecha en zona Bogotá + commit corto
+          // Fecha con zona Bogotá
           def tz  = java.util.TimeZone.getTimeZone('America/Bogota')
           def fmt = new java.text.SimpleDateFormat('yyyyMMdd-HHmmss'); fmt.setTimeZone(tz)
-          def dateTag    = fmt.format(new Date())
+          def dateTag = fmt.format(new Date())
+
+          // Commit corto desde git
           def shortCommit = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-          env.VERSION_TAG = "${dateTag}-${shortCommit}"
+
+          // Construir y asegurar el tag
+          def vt = "${dateTag}-${shortCommit}"
+          if (!vt?.trim()) { vt = "manual-${env.BUILD_NUMBER}" }
+
+          env.VERSION_TAG = vt
           echo "🔖 Versión: ${env.VERSION_TAG}"
           currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.VERSION_TAG}"
         }
@@ -46,7 +53,6 @@ pipeline {
             echo "Solución: ejecutar Jenkins con el socket del host y tener docker-cli dentro del contenedor."
             exit 2
           fi
-          # Verifica conexión al daemon
           docker version >/dev/null
           echo "✅ Docker OK"
         '''
@@ -73,9 +79,11 @@ pipeline {
             set -eu
             echo "🔐 Login Docker Hub..."
             echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
+
             echo "⬆️ Push de tags..."
             docker push ${IMAGE_NAME}:latest
             docker push ${IMAGE_NAME}:${VERSION_TAG}
+
             docker logout || true
           '''
         }
