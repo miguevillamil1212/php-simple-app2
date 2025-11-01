@@ -10,65 +10,70 @@ pipeline {
   environment {
     IMAGE_NAME      = 'miguel1212/php-simple-app2'
     DOCKER_BUILDKIT = '1'
-    VERSION_TAG     = ''
+    APP_ARCHIVE     = 'php-simple-app.tar.gz'
   }
 
   stages {
-
     stage('Checkout') {
       steps {
         git branch: 'main', url: 'https://github.com/miguevillamil1212/php-simple-app2.git'
       }
     }
+    stage('Detect Changes') {
+            steps {
+                script {
+                    // Obtiene el último commit del repo local
+                    def currentCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
 
-    stage('Generate Tag') {
+                    // Archivo para guardar el último commit desplegado
+                    def commitFile = "${env.WORKSPACE}/.last_commit"
+
+                    if (fileExists(commitFile)) {
+                        def lastCommit = readFile(commitFile).trim()
+                        if (currentCommit == lastCommit) {
+                            echo "No hay cambios nuevos desde el último despliegue (${lastCommit})."
+                            currentBuild.result = 'SUCCESS'
+                            currentBuild.displayName = "Sin cambios"
+                            skipRemainingStages()
+                        } else {
+                            echo "Cambios detectados. Último commit anterior: ${lastCommit}"
+                        }
+                    } else {
+                        echo "Primer despliegue: no existe registro previo de commit."
+                    }
+
+                    // Guarda el commit actual para la próxima ejecución
+                    writeFile file: commitFile, text: currentCommit
+                }
+            }
+        }
+
+    stage('Detectar Docker en el nodo') {
       steps {
         script {
-          // Fecha con zona Bogotá
-          def tz  = java.util.TimeZone.getTimeZone('America/Bogota')
-          def fmt = new java.text.SimpleDateFormat('yyyyMMdd-HHmmss'); fmt.setTimeZone(tz)
-          def dateTag = fmt.format(new Date())
-
-          // Commit corto desde git
-          def shortCommit = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-
-          // Construir y asegurar el tag
-          def vt = "${dateTag}-${shortCommit}"
-          if (!vt?.trim()) { vt = "manual-${env.BUILD_NUMBER}" }
-
-          env.VERSION_TAG = vt
-          echo "🔖 Versión: ${env.VERSION_TAG}"
-          currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.VERSION_TAG}"
+          def rc = sh(script: 'command -v docker >/dev/null 2>&1', returnStatus: true)
+          env.HAS_DOCKER = (rc == 0) ? 'true' : 'false'
+          echo "HAS_DOCKER = ${env.HAS_DOCKER}"
         }
       }
     }
 
-    stage('Preflight Docker') {
+    /* ========= Camino A: hay Docker => build & push ========= */
+    stage('Build Docker Image') {
+      when { expression { env.HAS_DOCKER == 'true' } }
       steps {
         sh '''
           set -eu
-          echo "🔍 Verificando Docker en el nodo..."
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "ERROR: No se encontró el cliente 'docker' en este nodo de Jenkins."
-            echo "Solución: ejecutar Jenkins con el socket del host y tener docker-cli dentro del contenedor."
-            exit 2
-          fi
-          docker version >/dev/null
-          echo "✅ Docker OK"
+          docker version
+          docker build \
+            -t $IMAGE_NAME:latest \
+            -t $IMAGE_NAME:${BUILD_NUMBER} .
         '''
       }
     }
 
-    stage('Build') {
-      steps {
-        sh '''
-          echo "🔧 Construyendo imagen..."
-          docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${VERSION_TAG} .
-        '''
-      }
-    }
-
-    stage('Push') {
+    stage('Login & Push a Docker Hub') {
+      when { expression { env.HAS_DOCKER == 'true' } }
       steps {
         withCredentials([usernamePassword(
           credentialsId: 'docker-hub-creds',
@@ -77,32 +82,44 @@ pipeline {
         )]) {
           sh '''
             set -eu
-            echo "🔐 Login Docker Hub..."
-            echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
-
-            echo "⬆️ Push de tags..."
-            docker push ${IMAGE_NAME}:latest
-            docker push ${IMAGE_NAME}:${VERSION_TAG}
-
+            echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+            docker push $IMAGE_NAME:latest
+            docker push $IMAGE_NAME:${BUILD_NUMBER}
             docker logout || true
           '''
         }
       }
     }
 
-    stage('Cleanup') {
+    stage('Cleanup Docker') {
+      when { expression { env.HAS_DOCKER == 'true' } }
       steps {
         sh 'docker system prune -f || true'
+      }
+    }
+
+    /* ========= Camino B: NO hay Docker => empaquetar y archivar ========= */
+    stage('Empaquetar app (sin Docker)') {
+      when { expression { env.HAS_DOCKER == "false" } }
+      steps {
+        sh '''
+          set -eu
+          rm -f "$APP_ARCHIVE"
+          # Empaqueta todo excepto .git y el workspace temporal de Jenkins
+          tar --exclude-vcs \
+              --exclude="./.git" \
+              --exclude="./.git/*" \
+              --exclude="./**/@tmp/**" \
+              -czf "$APP_ARCHIVE" .
+        '''
+        archiveArtifacts artifacts: "${APP_ARCHIVE}", fingerprint: true
+        echo "No hay Docker en el nodo. Se archivó la app como: ${APP_ARCHIVE}"
       }
     }
   }
 
   post {
-    success {
-      echo "✅ Publicado: ${IMAGE_NAME}:${VERSION_TAG}"
-    }
-    failure {
-      echo "❌ Pipeline falló. Revisa la etapa donde se detuvo."
-    }
+    success { echo '✅ Pipeline completado con éxito (Docker push si había Docker; artefacto .tar.gz si no).' }
+    failure { echo '❌ Pipeline falló' }
   }
 }
