@@ -1,26 +1,24 @@
 # Imagen base con Apache y PHP 8.2
 FROM php:8.2-apache
 
-# Actualizar e instalar dependencias comunes
-RUN apt-get update && apt-get install -y \
-    libzip-dev zip unzip git curl \
- && docker-php-ext-install pdo pdo_mysql mysqli \
- && a2enmod rewrite \
- && rm -rf /var/lib/apt/lists/*
+# Actualizar e instalar dependencias necesarias (sin recomendados)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libzip-dev zip unzip git curl \
+    && docker-php-ext-install pdo pdo_mysql mysqli \
+    && a2enmod rewrite \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copiar el código fuente
+# Código fuente
 WORKDIR /var/www/html
-COPY php-simple-app/src/ ./
+# Si tu código está en ./src, mantenlo así. Cambia la ruta si es distinto.
+COPY ./src/ ./
 
-# Configurar Apache
+# Configuración básica de Apache y permisos
 RUN chown -R www-data:www-data /var/www/html \
- && echo "ServerName localhost" >> /etc/apache2/apache2.conf
+    && echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
-# Exponer el puerto HTTP
+# Exponer HTTP
 EXPOSE 80
 
-# Definir usuario de ejecución (seguridad)
-USER www-data
-
-# Iniciar Apache (ya configurado en la imagen base)
+# Importante: no cambiar a USER www-data; apache necesita arrancar como root en esta imagen.
 CMD ["apache2-foreground"]
