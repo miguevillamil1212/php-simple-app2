@@ -1,19 +1,15 @@
-version: '3.8'
-
 services:
   php-simple-app2:
     build:
       context: .
       dockerfile: Dockerfile
-    # Puedes etiquetar la imagen con tu repositorio de Docker Hub para que
-    # el pipeline la empuje con el mismo nombre.
-    image: miguel1212/php-simple-app2:latest
+    image: miguel1212/php-simple-app2:dev
     container_name: php-simple-app2
     ports:
       - "8080:80"
     environment:
       - APACHE_DOCUMENT_ROOT=/var/www/html
+    # 👇 Monta la misma ruta anidada para ver cambios al instante
+    volumes:
+      - ./php-simple-app/src:/var/www/html
     restart: unless-stopped
-    # Para desarrollo en caliente, descomenta y ajusta la ruta:
-    # volumes:
-    #   - ./src:/var/www/html:ro

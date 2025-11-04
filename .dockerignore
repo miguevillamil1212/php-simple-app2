@@ -1,6 +1,7 @@
 .git
 .gitignore
 README.md
-Jenkinsfile
 docker-compose.yml
-jenkins/
+docker-compose.test.yml
+Jenkinsfile
+*.log
