@@ -7,7 +7,7 @@ pipeline {
 
   environment {
     IMAGE_NAME = 'miguel1212/php-simple-app2'
-    DOCKERHUB = credentials('docker-hub-credentials') // DOCKERHUB_USR / DOCKERHUB_PSW
+    DOCKERHUB = credentials('docker-hub-creds') // DOCKERHUB_USR / DOCKERHUB_PSW
   }
 
   stages {
