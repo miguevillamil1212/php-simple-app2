@@ -6,10 +6,7 @@ services:
     image: miguel1212/php-simple-app2:dev
     container_name: php-simple-app2
     ports:
-      - "8080:80"
-    environment:
-      - APACHE_DOCUMENT_ROOT=/var/www/html
-    # 👇 Monta la misma ruta anidada para ver cambios al instante
+      - "8082:80"
     volumes:
       - ./php-simple-app/src:/var/www/html
     restart: unless-stopped

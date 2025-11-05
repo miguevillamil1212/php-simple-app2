@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /var/www/html
 
-# 👇 OJO: carpeta anidada php-simple-app/src
+# Tu repo tiene la carpeta anidada php-simple-app/src
 COPY ./php-simple-app/src/ ./
 
 RUN chown -R www-data:www-data /var/www/html \
