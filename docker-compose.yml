@@ -1,12 +1,21 @@
 services:
-  php-simple-app2:
+  jenkins:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: miguel1212/php-simple-app2:dev
-    container_name: php-simple-app2
+      dockerfile: Dockerfile.jenkins
+    image: jenkins-with-dockercli:lts-jdk11
+    container_name: jenkins
+    user: root
+    privileged: true
     ports:
-      - "8082:80"
+      - "8080:8080"
+      - "50000:50000"
     volumes:
-      - ./php-simple-app/src:/var/www/html
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
     restart: unless-stopped
+
+volumes:
+  jenkins_data:
